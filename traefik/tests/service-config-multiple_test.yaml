@@ -11,7 +11,8 @@ tests:
       ports:
         udp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 80
           protocol: UDP
     asserts:
@@ -19,7 +20,7 @@ tests:
           path: metadata.annotations.dns-hostname
           value: tcp.example.com
         documentIndex: 0
-      - isNull:
+      - isNullOrEmpty:
           path: metadata.annotations
         documentIndex: 1
   - it: should have UDP only annotations when specified via values
@@ -31,11 +32,12 @@ tests:
       ports:
         udp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 80
           protocol: UDP
     asserts:
-      - isNull:
+      - isNullOrEmpty:
           path: metadata.annotations
         documentIndex: 0
       - equal:
@@ -55,7 +57,8 @@ tests:
       ports:
         udp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 80
           protocol: UDP
     asserts:
@@ -82,7 +85,8 @@ tests:
       ports:
         udp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 80
           protocol: UDP
     asserts:
@@ -108,7 +112,8 @@ tests:
       ports:
         udp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 80
           protocol: UDP
     asserts:
@@ -130,7 +135,8 @@ tests:
       ports:
         udp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 80
           protocol: UDP
     documentIndex: 1
@@ -149,11 +155,13 @@ tests:
         udp:
           port: 3000
           protocol: UDP
+          expose:
+            default: true
     asserts:
-      - isEmpty:
+      - isNull:
           path: spec.ipFamilyPolicy
         documentIndex: 0
-      - isEmpty:
+      - isNull:
           path: spec.ipFamilyPolicy
         documentIndex: 1
   - it: should have custom ipFamilyPolicy on both services when specified via values
@@ -165,6 +173,8 @@ tests:
         udp:
           port: 3000
           protocol: UDP
+          expose:
+            default: true
     asserts:
       - equal:
           path: spec.ipFamilyPolicy
@@ -182,11 +192,13 @@ tests:
         udp:
           port: 3000
           protocol: UDP
+          expose:
+            default: true
     asserts:
-      - isEmpty:
+      - isNull:
           path: spec.ipFamilies
         documentIndex: 0
-      - isEmpty:
+      - isNull:
           path: spec.ipFamilies
         documentIndex: 1
   - it: should have custom ipFamilies on both services when specified via values

@@ -1,7 +1,66 @@
 suite: Pod configuration
 templates:
   - deployment.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 16
 tests:
+  - it: should have set GOMAXPROCS with cpu limit
+    set:
+      resources:
+        limits:
+          cpu: "4"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GOMAXPROCS
+            valueFrom:
+              resourceFieldRef:
+                resource: limits.cpu
+                divisor: "1"
+  - it: should have set GOMEMLIMIT with cpu limit
+    set:
+      resources:
+        limits:
+          memory: "4"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GOMEMLIMIT
+            valueFrom:
+              resourceFieldRef:
+                resource: limits.memory
+                divisor: "1"
+  - it: should have not set GOMAXPROCS without cpu limit
+    asserts:
+      - notEqual:
+          path: spec.template.spec.containers[0].env[0].name
+          value: GOMAXPROCS
+  - it: should have not set GOMEMLIMIT without cpu limit
+    asserts:
+      - notEqual:
+          path: spec.template.spec.containers[0].env[0].name
+          value: GOMEMLIMIT
+  - it: should have expected env + additional env with specified values
+    set:
+      env:
+        - name: POD_TEST
+          value: powpow
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_TEST
+            value: powpow
   - it: should have envFrom with specified values
     set:
       envFrom:
@@ -28,16 +87,17 @@ tests:
       podSecurityContext:
         readOnlyRootFilesystem: false
       securityContext:
+        allowPrivilegeEscalation: true
         runAsUser: 1000
     asserts:
-      - equal:
-          path: spec.template.spec.securityContext.fsGroup
-          value: 65532
       - equal:
           path: spec.template.spec.securityContext.readOnlyRootFilesystem
           value: false
       - equal:
-          path: spec.template.spec.containers[0].securityContext.runAsNonRoot
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
           value: true
       - equal:
           path: spec.template.spec.containers[0].securityContext.runAsUser
@@ -141,7 +201,7 @@ tests:
           value: Always
   - it: should have no imagePullSecrets
     asserts:
-      - isEmpty:
+      - isNull:
           path: spec.template.spec.imagePullSecrets
   - it: should have imagePullSecrets with specified value
     set:
@@ -233,9 +293,9 @@ tests:
           content:
             key: "RSA"
             operator: "Destructor"
-  - it: should have all k8s provider enabled when gateway provider is enabled
+  - it: When gateway provider is enabled, k8s providers & default statusAddress should be set
     set:
-      experimental:
+      providers:
         kubernetesGateway:
           enabled: true
     asserts:
@@ -248,34 +308,116 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--providers.kubernetesgateway"
-  - it: should have the certificate resolver options applied
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--providers.kubernetesgateway.statusaddress.service.name=RELEASE-NAME-traefik"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--providers.kubernetesgateway.statusaddress.service.namespace=NAMESPACE"
+  - it: When gateway provider is enabled with ns override, k8s providers & default statusAddress should be set
     set:
-      certResolvers:
-        myAcmeResolver:
-          email: email@example.com
-          dnsChallenge:
-            provider: myProvider
-            resolvers:
-              - 1.1.1.1
-              - 8.8.8.8
-          tlsChallenge: true
+      namespaceOverride: foo
+      providers:
+        kubernetesGateway:
+          enabled: true
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content:
-            "--certificatesresolvers.myAcmeResolver.acme.email=email@example.com"
+          content: "--providers.kubernetesgateway.statusaddress.service.namespace=foo"
+
+
+  - it: should have experimental flag when set
+    set:
+      experimental:
+        kubernetesGateway:
+          enabled: true
+        fastProxy:
+          enabled: true
+    asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content:
-            "--certificatesresolvers.myAcmeResolver.acme.dnsChallenge.provider=myProvider"
+          content: "--experimental.kubernetesgateway"
       - contains:
           path: spec.template.spec.containers[0].args
-          content:
-            "--certificatesresolvers.myAcmeResolver.acme.dnsChallenge.resolvers=1.1.1.1,8.8.8.8"
+          content: "--experimental.fastProxy"
+  - it: should have debug experimental flag on fastProxy when set
+    set:
+      experimental:
+        fastProxy:
+          debug: true
+    asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content:
-            "--certificatesresolvers.myAcmeResolver.acme.tlsChallenge=true"
+          content: "--experimental.fastProxy.debug"
+
+  - it: shouldn't have experimental flag when >= 3.1.0
+    set:
+      image:
+        tag: v3.1.0
+      providers:
+        kubernetesGateway:
+          enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--experimental.kubernetesgateway"
+  - it: should have the certificate resolver options applied
+    set:
+      certificatesResolvers:
+        myAcmeResolver:
+          acme:
+            email: email@example.com
+            dnsChallenge:
+              provider: myProvider
+              resolvers:
+                - 1.1.1.1
+                - 8.8.8.8
+            tlsChallenge: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.myAcmeResolver.acme.email=email@example.com"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.myAcmeResolver.acme.dnsChallenge.provider=myProvider"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.myAcmeResolver.acme.dnsChallenge.resolvers=1.1.1.1,8.8.8.8"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.myAcmeResolver.acme.tlsChallenge=true"
+
+  - it: should have the distributed acme resolver options applied
+    set:
+      certificatesResolvers:
+        my-resolver:
+          distributedAcme:
+            email: email@example.com
+            storage:
+              kubernetes: true
+            httpChallenge:
+              entrypoint: "web"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.my-resolver.distributedAcme.email=email@example.com"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.my-resolver.distributedAcme.storage.kubernetes=true"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.my-resolver.distributedAcme.httpChallenge.entrypoint=web"
+
+  - it: should have the tailscale resolver options applied
+    set:
+      certificatesResolvers:
+        my-resolver:
+          tailscale: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--certificatesresolvers.my-resolver.tailscale=true"
+
   - it: should have prometheus annotations with specified values
     set:
       ports:
@@ -300,66 +442,21 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--metrics.prometheus.addRoutersLabels=true"
-  - it: should have Instana tracing enabled
+  - it: should have http3 enabled, when enabled with advertisedPort
     set:
-      tracing:
-        instana:
-          enabled: true
+      ports:
+        websecure:
+          http3:
+            advertisedPort: 443
+            enabled: true
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: "--tracing.instana=true"
-  - it: should have datadog tracing enabled
-    set:
-      tracing:
-        datadog:
-          enabled: true
-    asserts:
+          content: "--entryPoints.websecure.http3"
       - contains:
           path: spec.template.spec.containers[0].args
-          content: "--tracing.datadog=true"
-  - it: should have Jaeger tracing enabled
-    set:
-      tracing:
-        jaeger:
-          enabled: true
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--tracing.jaeger=true"
-  - it: should have Zipkin tracing enabled
-    set:
-      tracing:
-        zipkin:
-          enabled: true
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--tracing.zipkin=true"
-  - it: should have Haystack tracing enabled
-    set:
-      tracing:
-        haystack:
-          enabled: true
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--tracing.haystack=true"
-  - it: should have Elastic tracing enabled
-    set:
-      tracing:
-        elastic:
-          enabled: true
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--tracing.elastic=true"
-  - it: should not have the http3 experimental flag by default
-    asserts:
-      - notContains:
-          path: spec.template.spec.containers[0].args
-          content: "--experimental.http3=true"
-  - it: should have the http3 experimental flag and use default entrypoint port when http3 enabled
+          content: "--entryPoints.websecure.http3.advertisedPort=443"
+  - it: should be possible to enable http3 enabled without a custom advertisedPort
     set:
       ports:
         websecure:
@@ -368,44 +465,19 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: "--experimental.http3=true"
-      - contains:
+          content: "--entryPoints.websecure.http3"
+      - notContains:
           path: spec.template.spec.containers[0].args
-          content: "--entrypoints.websecure.http3"
+          content: "--entryPoints.websecure.http3.advertisedPort=443"
+
   - it: should not have http3 config flag by default
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].args
-          content: "--entrypoints.websecure.enableHTTP3=true"
+          content: "--entryPoints.websecure.http3"
       - notContains:
           path: spec.template.spec.containers[0].args
-          content: "--entrypoints.websecure.http3.advertisedPort=8443"
-  - it: should have http3 config flag enableHTTP3 when image tag < 2.6.0
-    set:
-      image:
-        tag: 2.5.6
-      ports:
-        websecure:
-          http3:
-            enabled: true
-          tls:
-            enabled: true
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--entrypoints.websecure.enableHTTP3=true"
-  - it: should have http3 config flag advertisedPort when image tag >= 2.6.0
-    set:
-      ports:
-        websecure:
-          http3:
-            enabled: true
-          tls:
-            enabled: true
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--entrypoints.websecure.http3"
+          content: "--entryPoints.websecure.http3.advertisedPort=8443"
   - it: should join entrypoints middleware when there are multiples
     set:
       ports:
@@ -416,7 +488,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: "--entrypoints.websecure.http.middlewares=auth@file,strip@kubernetes-crd"
+          content: "--entryPoints.websecure.http.middlewares=auth@file,strip@kubernetes-crd"
   - it: should apply middleware on entrypoint
     set:
       ports:
@@ -426,7 +498,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: "--entrypoints.web.http.middlewares=auth@file"
+          content: "--entryPoints.web.http.middlewares=auth@file"
   - it: should not complain when there are no middlewares on entrypoint
     set:
       ports:
@@ -435,7 +507,7 @@ tests:
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].args
-          content: "--entrypoints.web.http.middlewares="
+          content: "--entryPoints.web.http.middlewares="
   - it: should fail when user want to use hostnetwork with hostport != containerport
     set:
       hostNetwork: true
@@ -448,7 +520,7 @@ tests:
           hostPort: 81
     asserts:
       - failedTemplate:
-          errorMessage: "All hostPort must match their respective containerPort when `hostNetwork` is enabled"
+          errorMessage: "ERROR: All hostPort must match their respective containerPort when `hostNetwork` is enabled"
   - it: should pass when user want to set hostport != containerport without hostNetwork
     set:
       hostNetwork: false
@@ -464,3 +536,239 @@ tests:
           of: Deployment
       - isAPIVersion:
           of: apps/v1
+  - it: should have two http3 port when not using hostport
+    set:
+      ports:
+        websecure:
+          http3:
+            enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 8443
+            name: websecure
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 8443
+            name: websecure-http3
+            protocol: UDP
+  - it: should be possible to use hostport with http3
+    set:
+      ports:
+        websecure:
+          hostPort: 443
+          http3:
+            enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 8443
+            hostPort: 443
+            name: websecure
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 8443
+            hostPort: 443
+            name: websecure-http3
+            protocol: UDP
+  - it: should honor http3 advertised port when using hostport
+    set:
+      ports:
+        websecure:
+          hostPort: 443
+          http3:
+            enabled: true
+            advertisedPort: 1234
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 8443
+            hostPort: 443
+            name: websecure
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 8443
+            hostPort: 1234
+            name: websecure-http3
+            protocol: UDP
+  - it: should have a custom list of dns nameservers
+    set:
+      deployment:
+        dnsConfig:
+          nameservers:
+            - 1.1.1.1
+            - 2001:db8:30::a
+    asserts:
+      - equal:
+          path: spec.template.spec.dnsConfig.nameservers[0]
+          value: "1.1.1.1"
+      - equal:
+          path: spec.template.spec.dnsConfig.nameservers[1]
+          value: "2001:db8:30::a"
+  - it: should have a list of dns search domain
+    set:
+      deployment:
+        dnsConfig:
+          searches:
+            - ns1.svc.cluster-domain.example
+            - my.dns.search.suffix
+    asserts:
+      - equal:
+          path: spec.template.spec.dnsConfig.searches[0]
+          value: "ns1.svc.cluster-domain.example"
+      - equal:
+          path: spec.template.spec.dnsConfig.searches[1]
+          value: "my.dns.search.suffix"
+  - it: should have a custom dns options
+    set:
+      deployment:
+        dnsConfig:
+          options:
+            - name: ndots
+              value: 2
+            - name: edns0
+    asserts:
+      - equal:
+          path: spec.template.spec.dnsConfig.options[0].name
+          value: "ndots"
+      - equal:
+          path: spec.template.spec.dnsConfig.options[0].value
+          value: 2
+      - equal:
+          path: spec.template.spec.dnsConfig.options[1].name
+          value: "edns0"
+  - it: should not have prometheus annotations
+    set:
+      metrics:
+        prometheus:
+          serviceMonitor:
+            jobLabel: traefik
+    asserts:
+      - isNull:
+          path: spec.template.metadata.annotations.prometheus.io/scrape
+  - it: should set runtimeClassName when configured
+    set:
+      deployment:
+        runtimeClassName: ArbitraryRuntimeClass
+    asserts:
+      - equal:
+          path: spec.template.spec.runtimeClassName
+          value: ArbitraryRuntimeClass
+  - it: should not set runtimeClassName when configured
+    set:
+      deployment:
+        runtimeClassName:
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].runtimeClassName
+  - it: should set defaultRuleSyntax when configured
+    set:
+      core:
+        defaultRuleSyntax: v2
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--core.defaultRuleSyntax=v2"
+  - it: should not set defaultRuleSyntax by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--core.defaultRuleSyntax=v2"
+  - it: should fail when providing bad log format
+    set:
+      logs:
+        general:
+          format: "test"
+    asserts:
+      - failedTemplate:
+          errorPattern: "format"
+  - it: should set log filePath when configured
+    set:
+      logs:
+        general:
+          filePath: "/var/log/traefik.log"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--log.filePath=/var/log/traefik.log"
+  - it: should set log noColor when configured
+    set:
+      logs:
+        general:
+          noColor: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--log.noColor=true"
+  - it: should set log noColor when configured to false as it's default
+    set:
+      logs:
+        general:
+          noColor: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--log.noColor=false"
+  - it: should not set log noColor when configured and log format is not common
+    set:
+      logs:
+        general:
+          format: json
+          noColor: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--log.noColor=true"
+  - it: should fail when setting unknown log level
+    set:
+      logs:
+        general:
+          level: test
+    asserts:
+      - failedTemplate:
+          errorPattern: "level"
+  - it: should set allowEmptyServices for kubernetesCRD
+    set:
+      providers:
+        kubernetesCRD:
+          allowEmptyServices: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--providers.kubernetescrd.allowEmptyServices=true"
+  - it: should unset allowEmptyServices for kubernetesCRD
+    set:
+      providers:
+        kubernetesCRD:
+          allowEmptyServices: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--providers.kubernetescrd.allowEmptyServices=false"
+  - it: should set allowEmptyServices for kubernetesIngress
+    set:
+      providers:
+        kubernetesIngress:
+          allowEmptyServices: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--providers.kubernetesingress.allowEmptyServices=true"
+  - it: should unset allowEmptyServices for kubernetesIngress
+    set:
+      providers:
+        kubernetesIngress:
+          allowEmptyServices: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--providers.kubernetesingress.allowEmptyServices=false"

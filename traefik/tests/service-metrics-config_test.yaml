@@ -2,18 +2,20 @@ suite: Metrics Service configuration
 templates:
   - service-metrics.yaml
 tests:
-  - it: should not provide a dedicated metrics service by default
+  - it: "should not fail with long name by default"
+    release:
+      name: thisisaverylongreleasenameinordertotriggerit
     asserts:
       - hasDocuments:
           count: 0
-  - it: should not provide a dedicated metrics service when hub is enabled
+  - it: "should support prometheus: null"
     set:
-      hub:
-        enabled: true
       metrics:
-        prometheus:
-          service:
-            enabled: true
+        prometheus: null
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: should not provide a dedicated metrics service by default
     asserts:
       - hasDocuments:
           count: 0

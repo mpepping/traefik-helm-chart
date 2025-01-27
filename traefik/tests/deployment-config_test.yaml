@@ -2,11 +2,26 @@ suite: Deployment configuration
 templates:
   - deployment.yaml
 tests:
-  - it: should have 1 replica by default
+  - it: should provide expected defaults
     asserts:
       - equal:
           path: spec.replicas
           value: 1
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: metadata.namespace
+          value: NAMESPACE
   - it: should have the specified amount of replicas when specified via values
     set:
       deployment:
@@ -23,23 +38,11 @@ tests:
       - equal:
           path: spec.revisionHistoryLimit
           value: 1
-  - it: should have a rollingUpdate strategy with default values
-    asserts:
-      - equal:
-          path: spec.strategy.type
-          value: RollingUpdate
-      - equal:
-          path: spec.strategy.rollingUpdate.maxUnavailable
-          value: 0
-      - equal:
-          path: spec.strategy.rollingUpdate.maxSurge
-          value: 1
   - it: should have a custom merged rollingUpdate strategy with specified values
     set:
       updateStrategy:
         rollingUpdate:
           maxUnavailable: 4
-          vegetaForce: 9000
     asserts:
       - equal:
           path: spec.strategy.type
@@ -50,9 +53,6 @@ tests:
       - equal:
           path: spec.strategy.rollingUpdate.maxSurge
           value: 1
-      - equal:
-          path: spec.strategy.rollingUpdate.vegetaForce
-          value: 9000
   - it: should have annotations with specified values
     set:
       deployment:
@@ -67,6 +67,28 @@ tests:
       - equal:
           path: spec.template.metadata.annotations.traefik/powpow
           value: podAnnotations
+  - it: should have podAnnotations with specified values
+    set:
+      type: 'internal'
+      deployment:
+        podAnnotations:
+          traefik/powpow: podAnnotations
+          traefik/name: '{{ template "traefik.name" . }}'
+          traefik/{{ template "traefik.name" . }}.logs: 'log_processing_rules'
+          traefik/type: '{{ .Values.type }}'
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations.traefik/powpow
+          value: podAnnotations
+      - equal:
+          path: spec.template.metadata.annotations.traefik/name
+          value: 'traefik'
+      - equal:
+          path: spec.template.metadata.annotations["traefik/traefik.logs"]
+          value: 'log_processing_rules'
+      - equal:
+          path: spec.template.metadata.annotations.traefik/type
+          value: 'internal'
   - it: should have labels with specified values
     set:
       deployment:
@@ -130,19 +152,16 @@ tests:
       - equal:
           path: spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey
           value: kubernetes.io/hostname
-  - it: should have an OnDelete strategy when set
+  - it: should have Recreate strategy when set
     set:
       updateStrategy:
-        type: OnDelete
+        type: Recreate
     asserts:
       - equal:
           path: spec.strategy.type
-          value: OnDelete
-  - it: should use helm managed namespace as default behavior
-    asserts:
-      - equal:
-          path: metadata.namespace
-          value: NAMESPACE
+          value: Recreate
+      - notExists:
+          path: spec.strategy.rollingUpdate
   - it: should accept overridden namespace
     set:
       namespaceOverride: "traefik-ns-override"
@@ -150,3 +169,127 @@ tests:
       - equal:
           path: metadata.namespace
           value: "traefik-ns-override"
+  - it: should set default values for args
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - --global.checknewversion
+            - --global.sendanonymoususage
+            - --entryPoints.metrics.address=:9100/tcp
+            - --entryPoints.traefik.address=:8080/tcp
+            - --entryPoints.web.address=:8000/tcp
+            - --entryPoints.websecure.address=:8443/tcp
+            - --api.dashboard=true
+            - --ping=true
+            - --metrics.prometheus=true
+            - --metrics.prometheus.entrypoint=metrics
+            - --providers.kubernetescrd
+            - --providers.kubernetescrd.allowEmptyServices=true
+            - --providers.kubernetesingress
+            - --providers.kubernetesingress.allowEmptyServices=true
+            - --providers.kubernetesingress.ingressendpoint.publishedservice=NAMESPACE/RELEASE-NAME-traefik
+            - --entryPoints.websecure.http.tls=true
+            - --log.level=INFO
+  - it: should have abortOnPluginFailure, when enabled on traefik >=3.3.0
+    set:
+      image:
+        tag: v3.3.0
+      experimental:
+        abortOnPluginFailure: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--experimental.abortonpluginfailure=true"
+  - it: should fail when using obsolete syntax
+    set:
+      ports:
+        web:
+          redirectTo: websecure
+        websecure:
+          exposedPort: 443
+    asserts:
+      - failedTemplate:
+          errorPattern: "redirectTo"
+  - it: should fail when using previous syntax
+    set:
+      ports:
+        web:
+          redirectTo:
+            port: websecure
+        websecure:
+          exposedPort: 443
+    asserts:
+      - failedTemplate:
+          errorMessage: "ERROR: redirectTo syntax has been removed in v34 of this Chart. See Release notes or EXAMPLES.md for new syntax."
+  - it: should fail when redirect on websecure without https scheme
+    set:
+      ports:
+        web:
+          redirections:
+            entryPoint:
+              to: websecure
+        websecure:
+          exposedPort: 443
+    asserts:
+      - failedTemplate:
+          errorMessage: "ERROR: Cannot redirect web to websecure without setting scheme to https"
+  - it: should fail when redirect on non-existent entrypoint
+    set:
+      ports:
+        web:
+          redirections:
+            entryPoint:
+              to: foo
+        websecure:
+          exposedPort: 443
+    asserts:
+      - failedTemplate:
+          errorMessage: "ERROR: Cannot redirect web to foo: entryPoint not found"
+  - it: should be possible to set an http redirections
+    set:
+      ports:
+        web:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+        websecure:
+          exposedPort: 443
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--entryPoints.web.http.redirections.entryPoint.to=:443"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--entryPoints.web.http.redirections.entryPoint.scheme=https"
+  - it: should have http redirections enabled, when enabled with redirectTo and priority
+    set:
+      ports:
+        web:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+              priority: 10
+        websecure:
+          exposedPort: 443
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--entryPoints.web.http.redirections.entryPoint.priority=10"
+  - it: should have permanent http redirections enabled, when enabled with redirectTo and permanent
+    set:
+      ports:
+        web:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+              permanent: true
+        websecure:
+          exposedPort: 443
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--entryPoints.web.http.redirections.entryPoint.permanent=true"

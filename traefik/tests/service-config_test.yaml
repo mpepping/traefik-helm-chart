@@ -2,6 +2,29 @@ suite: Service configuration
 templates:
   - service.yaml
 tests:
+  - it: should provide a single service by default
+    asserts:
+      - hasDocuments:
+          count: 1
+  - it: should be possible to disable default service
+    set:
+      service:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: should fail when no ports are exposed
+    set:
+      ports:
+        web:
+          expose:
+            default: false
+        websecure:
+          expose:
+            default: false
+    asserts:
+      - failedTemplate:
+          errorMessage: "ERROR: Cannot create Service RELEASE-NAME-traefik without ports"
   - it: should be a type LoadBalancer by default
     asserts:
       - equal:
@@ -17,7 +40,7 @@ tests:
           value: NodePort
   - it: should have no annotations by default
     asserts:
-      - isNull:
+      - isNullOrEmpty:
           path: metadata.annotations
   - it: should have customized annotations when specified via values
     set:
@@ -37,6 +60,10 @@ tests:
       - equal:
           path: metadata.labels.custom-label
           value: custom-value
+  - it: should have no load balancer class by default
+    asserts:
+      - isNull:
+          path: spec.loadBalancerClass
   - it: should have custom spec elements when specified via values
     set:
       service:
@@ -44,6 +71,7 @@ tests:
           externalTrafficPolicy: Cluster
           loadBalancerIP: "1.2.3.4"
           clusterIP: "2.3.4.5"
+          loadBalancerClass: myclass
           loadBalancerSourceRanges:
             - 192.168.0.1/32
             - 172.16.0.0/16
@@ -75,16 +103,22 @@ tests:
       - equal:
           path: spec.externalIPs[0]
           value: "1.2.3.4"
+      - equal:
+          path: spec.loadBalancerClass
+          value: myclass
   - it: should have custom spec elements when specified via values for TCP ports
     set:
       ports:
         web:
-          expose: false
+          expose:
+            default: false
         websecure:
-          expose: false
+          expose:
+            default: false
         tcp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 8080
           protocol: TCP
     documentIndex: 0
@@ -102,12 +136,15 @@ tests:
     set:
       ports:
         web:
-          expose: false
+          expose:
+            default: false
         websecure:
-          expose: false
+          expose:
+            default: false
         udp:
           port: 3000
-          expose: true
+          expose:
+            default: true
           exposedPort: 8080
           protocol: UDP
     documentIndex: 0
@@ -128,7 +165,7 @@ tests:
           port: 3000
           protocol: UDP
     asserts:
-      - isEmpty:
+      - isNull:
           path: spec.ipFamilyPolicy
         documentIndex: 0
   - it: should have custom ipFamilyPolicy when specified via values
@@ -151,7 +188,7 @@ tests:
           port: 3000
           protocol: UDP
     asserts:
-      - isEmpty:
+      - isNull:
           path: spec.ipFamilies
         documentIndex: 0
   - it: should have custom ipFamilies when specified via values
@@ -169,6 +206,28 @@ tests:
           value:
             - IPv6
           documentIndex: 0
+  - it: should not have appProtocol when not specified
+    documentIndex: 0
+    asserts:
+      - isNull:
+          path: spec.ports[0].appProtocol
+      - isNull:
+          path: spec.ports[1].appProtocol
+  - it: should have custom appProtocol when specified via values
+    set:
+      ports:
+        web:
+          appProtocol: http
+        websecure:
+          appProtocol: https
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ports[0].appProtocol
+          value: http
+      - equal:
+          path: spec.ports[1].appProtocol
+          value: https
   - it: should use default websecure UDP port when http3 is enabled
     set:
       ports:
@@ -179,18 +238,13 @@ tests:
             enabled: true
     documentIndex: 0
     asserts:
-    - equal:
-        path: spec.ports[2].name
-        value: "websecure-http3"
-    - equal:
-        path: spec.ports[2].port
-        value: 443
-    - equal:
-        path: spec.ports[2].targetPort
-        value: 8443
-    - equal:
-        path: spec.ports[2].protocol
-        value: UDP
+    - contains:
+        path: spec.ports
+        content:
+          port: 443
+          name: "websecure-http3"
+          targetPort: websecure-http3
+          protocol: UDP
   - it: should be possible to advertise a different http3 UDP port
     set:
       ports:
@@ -202,29 +256,69 @@ tests:
             enabled: true
     documentIndex: 0
     asserts:
-    - equal:
-        path: spec.ports[2].name
-        value: "websecure-http3"
-    - equal:
-        path: spec.ports[2].port
-        value: 4443
-    - equal:
-        path: spec.ports[2].targetPort
-        value: 8443
-    - equal:
-        path: spec.ports[2].protocol
-        value: UDP
-  - it: should fail when there is no exposed port
+    - contains:
+        path: spec.ports
+        content:
+          port: 4443
+          name: "websecure-http3"
+          targetPort: websecure-http3
+          protocol: UDP
+  - it: should split TCP and UDP Service on http3 when single is false
     set:
       ports:
-        web:
-          expose: false
         websecure:
-          expose: false
+          http3:
+            enabled: true
+      service:
+        single: false
     asserts:
-    - failedTemplate:
-        errorMessage: "You need to expose at least one port or set enabled=false to service"
-        documentIndex: 1
+    - hasDocuments:
+        count: 2
+    - contains:
+        path: spec.ports
+        content:
+          port: 443
+          name: "websecure"
+          targetPort: websecure
+          protocol: TCP
+      documentIndex: 0
+    - contains:
+        path: spec.ports
+        content:
+          port: 443
+          name: "websecure-http3"
+          targetPort: websecure-http3
+          protocol: UDP
+      documentIndex: 1
+  - it: should use advertisedPort with splitted TCP and UDP Service on http3 when single is false
+    set:
+      ports:
+        websecure:
+          http3:
+            enabled: true
+            advertisedPort: 4443
+      service:
+        single: false
+    asserts:
+    - hasDocuments:
+        count: 2
+    - contains:
+        path: spec.ports
+        content:
+          port: 443
+          name: "websecure"
+          targetPort: websecure
+          protocol: TCP
+      documentIndex: 0
+    - contains:
+        path: spec.ports
+        content:
+          port: 4443
+          name: "websecure-http3"
+          targetPort: websecure-http3
+          protocol: UDP
+      documentIndex: 1
+
   - it: should not be possible to use http3 without enabling tls
     set:
       ports:
@@ -235,9 +329,7 @@ tests:
             enabled: true
     asserts:
       - failedTemplate:
-          errorMessage: "You cannot enable http3 without enabling tls"
-          path: items[1].spec.ports[0].protocol
-          value: UDP
+          errorMessage: "ERROR: You cannot enable http3 without enabling tls"
   - it: should use helm managed namespace as default behavior UDP
     set:
       ports:
@@ -280,3 +372,32 @@ tests:
       - equal:
           path: metadata.namespace
           value: "traefik-ns-override"
+  - it: should have different target port when targetPort is different from port
+    set:
+      ports:
+        web:
+          port: 8080
+          exposedPort: 80
+          expose:
+            default: true
+          targetPort: 80
+        websecure:
+          port: 443
+          exposedPort: 443
+          expose:
+            default: true
+          targetPort: 80
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 80
+      - equal:
+          path: spec.ports[0].targetPort
+          value: 80
+      - equal:
+          path: spec.ports[1].port
+          value: 443
+      - equal:
+          path: spec.ports[1].targetPort
+          value: 80

@@ -2,29 +2,30 @@ apiVersion: v2
 name: traefik
 description: A Traefik based Kubernetes ingress controller
 type: application
-version: 20.6.0
-appVersion: v2.9.5
+version: 34.1.0
+# renovate: image=traefik
+appVersion: v3.3.2
+kubeVersion: ">=1.22.0-0"
 keywords:
   - traefik
   - ingress
+  - networking
 home: https://traefik.io/
 sources:
   - https://github.com/traefik/traefik
   - https://github.com/traefik/traefik-helm-chart
 maintainers:
-  - name: emilevauge
-    email: emile@vauge.com
-  - name: dtomcej
-    email: daniel.tomcej@gmail.com
-  - name: ldez
-    email: ldez@traefik.io
   - name: mloiseleur
     email: michel.loiseleur@traefik.io
   - name: charlie-haley
     email: charlie.haley@traefik.io
+  - name: darkweaver87
+    email: remi.buisson@traefik.io
+  - name: jnoordsij
 icon: https://raw.githubusercontent.com/traefik/traefik/v2.3/docs/content/assets/img/traefik.logo.png
 annotations:
   artifacthub.io/changes: |
-    - "🔍️ Add filePath support on access logs (#747)"
-    - ":bug: Add missing scheme in help on Traefik Hub integration (#746)"
-    - ":memo: Improve documentation on using PVC with TLS certificates"
+    - "fix(Traefik Proxy): support uppercase letters in entrypoint names"
+    - "feat(deps): update traefik docker tag to v3.3.2"
+    - "feat(Traefik Hub): add OAS validateRequestMethodAndPath - CRDs update"
+    - "chore(release): publish v34.1.0 and CRDs v1.2.0"

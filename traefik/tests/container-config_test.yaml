@@ -2,13 +2,16 @@ suite: Main Container configuration
 templates:
   - deployment.yaml
 chart:
-  appVersion: v2.0.0
+  appVersion: v2.3.0
+capabilities:
+  majorVersion: 1
+  minorVersion: 16
 tests:
   - it: should have the default Docker image when no value is specified
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: traefik:v2.0.0
+          value: docker.io/traefik:v2.3.0
   - it: should change image when image.tag value is specified
     set:
       image:
@@ -16,19 +19,27 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: traefik:v2.0.0-beta1
-  - it: should change image when image.name value is specified
+          value: docker.io/traefik:v2.0.0-beta1
+  - it: should change image when image.repository value is specified
     set:
       image:
-        name: traefik/traefik
+        repository: traefik/traefik
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: traefik/traefik:v2.0.0
+          value: docker.io/traefik/traefik:v2.3.0
+  - it: should change image when image.registry value is specified
+    set:
+      image:
+        registry: example.org
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: example.org/traefik:v2.3.0
 
   - it: should have no resource limit by default
     asserts:
-      - isNull:
+      - isNullOrEmpty:
           path: spec.template.spec.containers[0].resources
   - it: should have a custom resource limit when specified
     set:
@@ -176,7 +187,7 @@ tests:
         topologyKey: kubernetes.io/hostname
     asserts:
       - failedTemplate:
-          errorMessage: "topologySpreadConstraints are supported only on kubernetes >= v1.19"
+          errorMessage: "ERROR: topologySpreadConstraints are supported only on kubernetes >= v1.19"
   - it: should set instance label to release.name-release.namespace if no override is set
     asserts:
       - isSubset:
@@ -195,3 +206,13 @@ tests:
             matchLabels:
               app.kubernetes.io/name: traefik
               app.kubernetes.io/instance: traefik
+  - it: should set instance label to release.name-namespaceOverride when it is set
+    set:
+      namespaceOverride: foo
+    asserts:
+      - isSubset:
+          path: spec.selector
+          content:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+              app.kubernetes.io/instance: RELEASE-NAME-foo
